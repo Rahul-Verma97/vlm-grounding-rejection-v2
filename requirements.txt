@@ -1,0 +1,6 @@
+transformers==4.57.1
+accelerate>=0.34
+datasets>=2.19
+pillow
+numpy
+scikit-learn
