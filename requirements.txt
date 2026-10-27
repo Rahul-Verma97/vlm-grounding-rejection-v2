@@ -1,4 +1,4 @@
-transformers==4.57.1
+transformers==4.57.6
 accelerate>=0.34
 datasets>=2.19
 pillow
