@@ -10,7 +10,7 @@ See [docs/SURVEY.md](docs/SURVEY.md) for related work and the gap analysis.
 
 ## Run (Kaggle, GPU T4, Internet on)
 ```bash
-git clone <this repo> && cd vlm-grounding-rejection
+git clone https://github.com/rahulver551/vlm-grounding-rejection && cd vlm-grounding-rejection
 pip install -q -r requirements.txt
 python scripts/run_diagnostic.py --dataset refcocog_rej --n 300 --out results/rcg_qwen25vl3b.jsonl
 python scripts/run_diagnostic.py --dataset groundingme --n 0 --out results/gme_qwen25vl3b.jsonl
