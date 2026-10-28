@@ -35,6 +35,23 @@ def _rgb(img) -> Image.Image:
     return img.convert("RGB")
 
 
+def _load_checked(raw, width, height):
+    """Decode an image and make sure it is in the same pixel frame as the dataset's boxes.
+
+    Returns (image, info). If the decoded size differs from the stored width/height, try applying
+    the EXIF orientation; record what happened so analysis can flag affected rows."""
+    from PIL import ImageOps
+
+    img = raw if isinstance(raw, Image.Image) else Image.open(raw)
+    info = {"decoded_wh": list(img.size), "size_mismatch": False, "exif_fixed": False}
+    if width and height and tuple(img.size) != (int(width), int(height)):
+        info["size_mismatch"] = True
+        t = ImageOps.exif_transpose(img)
+        if tuple(t.size) == (int(width), int(height)):
+            img, info["exif_fixed"] = t, True
+    return img.convert("RGB"), info
+
+
 def iter_refcocog_rej(n_pairs: int, split: str = "validation", skip: int = 0) -> Iterator[Query]:
     from datasets import load_dataset
 
@@ -44,11 +61,11 @@ def iter_refcocog_rej(n_pairs: int, split: str = "validation", skip: int = 0) ->
             continue
         if i >= skip + n_pairs:
             break
-        img = _rgb(row["image"])
+        img, info = _load_checked(row["image"], row.get("width"), row.get("height"))
         pid = f"rcg{row['id']}"
         common = dict(image=img, gt_bbox=list(row["original_bbox"]), source="refcocog_rej", pair_id=pid,
                       meta={"width": row.get("width"), "height": row.get("height"),
-                            "original_exp": row["original_exp"], "rejected_exp": row["rejected_exp"]})
+                            "original_exp": row["original_exp"], "rejected_exp": row["rejected_exp"], **info})
         yield Query(qid=pid + "_pos", expression=row["original_exp"], groundable=True, **common)
         yield Query(qid=pid + "_neg", expression=row["rejected_exp"], groundable=False, **common)
 
@@ -60,12 +77,13 @@ def iter_groundingme(limit: Optional[int] = None) -> Iterator[Query]:
     for i, row in enumerate(ds):
         if limit is not None and i >= limit:
             break
+        img, info = _load_checked(row["image"], row.get("width"), row.get("height"))
         bbox = row.get("bbox")
         groundable = bbox is not None and len(bbox) == 4
         yield Query(
-            qid=f"gme{row['id']}", image=_rgb(row["image"]), expression=row["description"],
+            qid=f"gme{row['id']}", image=img, expression=row["description"],
             groundable=groundable, gt_bbox=list(bbox) if groundable else None, source="groundingme",
             meta={"subtask_l1": row.get("subtask_l1"), "subtask_l2": row.get("subtask_l2"),
                   "detection_type": row.get("detection_type"),
-                  "width": row.get("width"), "height": row.get("height")},
+                  "width": row.get("width"), "height": row.get("height"), **info},
         )

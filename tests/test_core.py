@@ -39,7 +39,7 @@ def test_analyze_end_to_end():
         for g in (True, False):
             refused = (not g) and rng.random() < 0.1
             rows.append(dict(qid=f"p{i}{g}", pair_id=f"p{i}", source="refcocog_rej", expression="x", groundable=g,
-                gt_bbox=[10,10,50,50], meta={}, model="m", refused=refused, has_nan=False,
+                gt_bbox=[10,10,60,60], meta={}, model="m", refused=refused, has_nan=False,
                 box_orig=None if refused else [10,10,60,60], output_box=0 if refused else 1,
                 box_logprob_mean=None if refused else rng.normal(-.1,.05), box_logprob_min=None if refused else -0.5,
                 attn_inbox_frac=None if refused else rng.normal(.3,.05), attn_inbox_ratio=None if refused else 2.0,
@@ -48,5 +48,23 @@ def test_analyze_end_to_end():
         for r in rows: f.write(json.dumps(r)+"\n")
     out = subprocess.run([sys.executable, "scripts/analyze.py", f.name], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
-    assert "GT bbox format: xywh" in out.stdout and "verify_crop" in out.stdout
+    assert "GT bbox format: xyxy" in out.stdout and "verify_crop" in out.stdout
     print(out.stdout)
+
+def test_load_checked_exif():
+    from PIL import Image
+    from grej.data import _load_checked
+    img = Image.new("RGB", (40, 20))
+    exif = img.getexif(); exif[0x0112] = 6  # rotate 90 CW on display
+    import io; b = io.BytesIO(); img.save(b, "JPEG", exif=exif); b.seek(0)
+    out, info = _load_checked(Image.open(b), 20, 40)
+    assert info["size_mismatch"] and info["exif_fixed"] and out.size == (20, 40)
+    out, info = _load_checked(Image.new("RGB", (40, 20)), 40, 20)
+    assert not info["size_mismatch"]
+
+def test_known_bbox_format():
+    sys.path.insert(0, "scripts")
+    import analyze
+    rows = [dict(source="groundingme", groundable=True, gt_bbox=[1376, 839, 1425, 976], box_orig=[1376, 839, 1425, 976])]
+    assert analyze.pick_bbox_format(rows) == "xyxy"
+    assert abs(analyze.gt_iou(rows[0], "xyxy") - 1.0) < 1e-9

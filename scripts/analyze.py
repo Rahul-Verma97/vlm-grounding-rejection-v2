@@ -33,8 +33,16 @@ def gt_iou(r, fmt):
     return iou(r["box_orig"], gt)
 
 
+# Verified against the raw datasets (2026-10-28): both store [x1, y1, x2, y2] in original-image pixels.
+# e.g. GroundingME id 0: bbox [1376, 839, 1425, 976] in a 1500x2000 image (xywh would overflow the image).
+BBOX_FORMAT = {"refcocog_rej": "xyxy", "groundingme": "xyxy"}
+
+
 def pick_bbox_format(rows):
-    """Pick the GT box format (xywh vs xyxy) that agrees better with the model's boxes on groundable queries."""
+    """Known per-dataset GT box format; falls back to the better-agreeing format for unknown sources."""
+    srcs = {r.get("source") for r in rows}
+    if len(srcs) == 1 and next(iter(srcs)) in BBOX_FORMAT:
+        return BBOX_FORMAT[next(iter(srcs))]
     best, best_v = "xywh", -1
     for fmt in ["xywh", "xyxy"]:
         v = [gt_iou(r, fmt) for r in rows if r.get("groundable")]
@@ -107,17 +115,33 @@ def report(rows, title):
     return out
 
 
+def groundingme_breakdown(sub):
+    sub = [r for r in sub if "error" not in r]
+    mism = [r for r in sub if (r.get("meta") or {}).get("size_mismatch")]
+    if mism:
+        print(f"\nImage size != dataset width/height in {len(mism)} rows (EXIF-corrected: "
+              f"{sum(1 for r in mism if r['meta'].get('exif_fixed'))})")
+    rej = [r for r in sub if not r["groundable"]]
+    print("\nGroundingME by L1 category (acc@0.5 uses xyxy GT):")
+    print(f"  {'category':<16}{'n':>5}{'refused':>9}{'acc@0.5':>9}"
+          f"{'AUROC verify_full':>19}{'AUROC attn':>12}   (correct pos in category vs all Rejection)")
+    for c in sorted({(r.get("meta") or {}).get("subtask_l1") for r in sub} - {None}):
+        cr = [r for r in sub if (r.get("meta") or {}).get("subtask_l1") == c]
+        ious = [gt_iou(r, "xyxy") or 0.0 for r in cr if r["groundable"]]
+        acc = np.mean([x >= 0.5 for x in ious]) if ious else float("nan")
+        corr = [r for r in cr if r["groundable"] and (gt_iou(r, "xyxy") or 0) >= 0.5]
+        a1 = auroc([score(r, "verify_full") for r in corr], [score(r, "verify_full") for r in rej]) if corr else float("nan")
+        a2 = auroc([score(r, "attn_inbox_frac") for r in corr], [score(r, "attn_inbox_frac") for r in rej]) if corr else float("nan")
+        print(f"  {c:<16}{len(cr):>5}{np.mean([r['refused'] for r in cr]):>9.3f}{acc:>9.3f}{a1:>19.3f}{a2:>12.3f}   (n_correct={len(corr)})")
+
+
 def main():
     rows = load(sys.argv[1:])
     for src in sorted({r["source"] for r in rows}):
         sub = [r for r in rows if r["source"] == src]
         report(sub, src)
         if src == "groundingme":
-            cats = sorted({(r.get("meta") or {}).get("subtask_l1") for r in sub} - {None})
-            print("\nGroundingME refusal rate by L1 category:")
-            for c in cats:
-                cr = [r for r in sub if (r.get("meta") or {}).get("subtask_l1") == c and "error" not in r]
-                print(f"  {c:<16} n={len(cr):<4} refused={np.mean([r['refused'] for r in cr]):.3f}")
+            groundingme_breakdown(sub)
     errs = [r for r in rows if "error" in r]
     if errs:
         print(f"\n{len(errs)} errors; first: {errs[0]['error']}")
