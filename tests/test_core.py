@@ -68,3 +68,27 @@ def test_known_bbox_format():
     rows = [dict(source="groundingme", groundable=True, gt_bbox=[1376, 839, 1425, 976], box_orig=[1376, 839, 1425, 976])]
     assert analyze.pick_bbox_format(rows) == "xyxy"
     assert abs(analyze.gt_iou(rows[0], "xyxy") - 1.0) < 1e-9
+
+def test_clean_claims():
+    from grej.claims import clean_claims
+    t = "Here are the facts:\n- orange handles\n2. dark metallic jaws\n* orange handles\n\nshape of pliers"
+    assert clean_claims(t, "d", 8) == ["orange handles", "dark metallic jaws", "shape of pliers"]
+    assert clean_claims("", "desc", 8) == ["desc"]
+    assert len(clean_claims("\n".join(f"fact {i}" for i in range(20)), "d", 5)) == 5
+
+def test_analyze_claims_runs(tmp_path):
+    import subprocess
+    rng = np.random.default_rng(0); rows = []
+    for i in range(40):
+        for g in (True, False):
+            sc = list(rng.normal(1, 1, 4)) + ([] if g else [-3.0])
+            rows.append(dict(qid=f"q{i}{g}", pair_id=None, source="groundingme", expression="a b c", groundable=g,
+                gt_bbox=[0,0,10,10] if g else None, meta={"subtask_l1": "Limited" if g else "Rejection"},
+                refused=False, box_orig=[0,0,10,10], desc_words=3, claims=["c"]*len(sc), claim_scores=sc,
+                claim_min=min(sc), claim_min2=sorted(sc)[1], claim_mean=float(np.mean(sc)),
+                verify_full=float(rng.normal()), verify_crop=float(rng.normal()), box_area_frac=0.1))
+    p = tmp_path / "c.jsonl"; p.write_text("\n".join(json.dumps(r) for r in rows))
+    out = subprocess.run([sys.executable, "scripts/analyze_claims.py", str(p)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    line = [l for l in out.stdout.splitlines() if "claim_min " in l and "AUROC" in l][0]
+    assert float(line.split()[-1]) > 0.9, out.stdout

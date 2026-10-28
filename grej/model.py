@@ -33,12 +33,14 @@ VERIFY_FULL_PROMPT = 'Is there "{exp}" in the image? Answer yes or no.'
 class Grounder:
     def __init__(self, model_name: str = "Qwen/Qwen2.5-VL-3B-Instruct", dtype: str = "float16",
                  max_pixels: int = 640 * 28 * 28, min_pixels: int = 64 * 28 * 28,
-                 device_map: str = "cuda:0", layer_band: Optional[tuple[int, int]] = None):
+                 device_map: str = "cuda:0", layer_band: Optional[tuple[int, int]] = None,
+                 attn_implementation: str = "eager"):
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
         td = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[dtype]
+        # "eager" is needed for attention signals; "sdpa" is faster when they are not used
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name, torch_dtype=td, attn_implementation="eager", device_map=device_map
+            model_name, torch_dtype=td, attn_implementation=attn_implementation, device_map=device_map
         ).eval()
         self.proc = AutoProcessor.from_pretrained(model_name, min_pixels=min_pixels, max_pixels=max_pixels)
         self.tok = self.proc.tokenizer
